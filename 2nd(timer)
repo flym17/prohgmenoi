@@ -1,0 +1,70 @@
+#include <avr/io.h>
+#include <avr/interrupt.h>
+
+#define LED_CARS        PIN0_bm  // Φανάρι αυτοκινήτων (PORTD.0)
+#define LED_TRAM        PIN1_bm  // Φανάρι τραμ (PORTD.1)
+#define LED_PEDESTRIAN  PIN2_bm  // Φανάρι πεζών (PORTD.2)
+#define BUTTON          PIN5_bm  // Κουμπί πεζών (PORTF.5)
+
+volatile uint8_t tram_passing = 0;
+volatile uint8_t pedestrian_request = 0;
+
+void setupTimer() {
+    TCA0.SPLIT.CTRLD = TCA_SPLIT_SPLITM_bm;  // Ενεργοποίηση split mode
+    TCA0.SPLIT.LPER = 200;  // Χρονισμός T1 (τραμ)
+    TCA0.SPLIT.HPER = 100;  // Χρονισμός T2/T3 (φανάρια)
+    
+    TCA0.SPLIT.LCMP0 = 200;  // Ρύθμιση Timer 0 για το τραμ
+    
+    TCA0.SPLIT.INTCTRL = TCA_SPLIT_LCMP0_bm | TCA_SPLIT_HUNF_bm;  // Ενεργοποίηση διακοπών
+
+    TCA0.SPLIT.CTRLA = TCA_SPLIT_CLKSEL_DIV256_gc | TCA_SPLIT_ENABLE_bm;  // Εκκίνηση με διαίρεση 256
+}
+
+void setupButtonInterrupt() {
+    PORTF.PIN5CTRL = PORT_PULLUPEN_bm | PORT_ISC_FALLING_gc;  // Pull-up & interrupt στην πτώση
+}
+
+ISR(TCA0_LCMP0_vect) {
+    tram_passing = 1;
+    PORTD.OUTCLR = LED_TRAM;  // Άναμμα τραμ (λογικό 0)
+    TCA0.SPLIT.INTFLAGS = TCA_SPLIT_LCMP0_bm;  // Καθαρισμός σημαίας διακοπής
+}
+
+ISR(TCA0_HUNF_vect) {
+    if (tram_passing) {
+        tram_passing = 0;
+        PORTD.OUTSET = LED_TRAM;  // Σβήσιμο τραμ (λογικό 1)
+    }
+
+    if (pedestrian_request) {
+        pedestrian_request = 0;
+        PORTD.OUTCLR = LED_PEDESTRIAN;  // Άναμμα πεζών (λογικό 0)
+        PORTD.OUTSET = LED_CARS;  // Σβήσιμο αυτοκινήτων (λογικό 1)
+    } else {
+        PORTD.OUTCLR = LED_CARS;  // Άναμμα αυτοκινήτων (λογικό 0)
+        PORTD.OUTSET = LED_PEDESTRIAN;  // Σβήσιμο πεζών (λογικό 1)
+    }
+
+    TCA0.SPLIT.INTFLAGS = TCA_SPLIT_HUNF_bm;  // Καθαρισμός σημαίας διακοπής
+}
+
+ISR(PORTF_PORT_vect) {
+    pedestrian_request = 1;  // Σήμα για αλλαγή φαναριών
+    PORTF.INTFLAGS = BUTTON;  // Καθαρισμός σημαίας διακοπής
+}
+
+int main(void) {
+    PORTD.DIRSET = LED_CARS | LED_TRAM | LED_PEDESTRIAN;
+    PORTD.OUTCLR = LED_CARS;
+    PORTD.OUTSET = LED_PEDESTRIAN | LED_TRAM;
+
+    setupTimer();
+    setupButtonInterrupt();
+
+    sei();  // Ενεργοποίηση γενικών διακοπών
+
+    while (1) {
+        // Το πρόγραμμα λειτουργεί με interrupts
+    }
+}
